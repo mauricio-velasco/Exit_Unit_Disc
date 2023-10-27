@@ -1,9 +1,9 @@
 include("Moment_Estimation_Functions.jl")
 using JSON
-"""In this file we carry out the computations needed for the figures. The resulting data is saved in a .json file
-which is then loaded by Paper_Figures_builder.jl to actually make the figures of the article"""
+"""In this file we carry out the computations needed for the figures. The resulting data is saved in .json files which are
+then loaded by Paper_Figures_builder.jl to actually make the .pngs of the figures for the article"""
 
-"""The figures show the behavior of three stochastic processes in the unit disc, specified by the infinitesimal generators below"""
+"""We study the behavior of three stochastic processes in the unit disc, specified by the infinitesimal generators below"""
 function Brownian_infinitesimal_operator(p)
     #this function implements the differential operator L for Brownian motion, which is negative ONE HALF of the laplacian
     list = []
@@ -20,7 +20,7 @@ function Brownian_with_drift_infinitesimal_operator(p)
     # dX_1 = dW_1
     # dX_2 = 2dt + dW_2 
     vars = variables(p)
-    list = [(-2)*differentiate(p,x[2])]
+    list = [(-2)*differentiate(p,vars[2])]
     for var in vars
         push!(list, (-1/2)*differentiate(differentiate(p,var),var))
     end
@@ -34,6 +34,7 @@ function Sq_bessel_infinitesimal_operator(p)
     #and the squared bessel in the other
     # dX_1 = dW_1
     # dX_2 = dt + 2 \sqrt{X_2}dW_2 
+    x = variables(p)
     list = [-differentiate(p,x[2])]
     push!(list, (-1/2)*differentiate(differentiate(p,x[1]),x[1]))
     push!(list, -2*x[2]*differentiate(differentiate(p,x[2]),x[2]))
@@ -50,7 +51,7 @@ function compute_occupation_measure_data(scenario_name, differential_operator_L,
     try 
         densities_dict = JSON.parsefile(occupation_data_filename)
     catch e
-        #File does not exist, creating...
+        #File does not exist, so the empty dictionary above will work...
     end
 
     n = 2 #dimension two
@@ -101,18 +102,81 @@ function compute_occupation_measure_data(scenario_name, differential_operator_L,
 end
 
 
+function compute_exit_location_density_data(sc_dict, occupation_density_filename = "exit_densities.json" )
+    #First we load the existing data. We will update runs with the given parameters while keeping older runs with distinct parameters.
+    densities_dict = JSON.parsefile(occupation_density_filename)
+    #Now we do the computations.
+    #First we set the global variables
+    n = 2 #dimension two
+    @polyvar x[1:n]
+    space_vars_vector = x
+    initial_location = [0.0,0.5]
+    error_tolerance = 1e-5
+    #Grid in which we will sample the densities for later plotting (note that the obtained density 
+    #approximation is a polynomial and that this discretization is only for plotting purposes)
+    thetas = [t for t in range(-pi/2, 3*pi/2, length=300)]
+    points = [[cos(theta),sin(theta)] for theta in thetas]
+    #Now we iterate
+    Tot_maxgap = Inf #This will store the largest observed error among all moment estimations.
+    worst_moment_condition_number = 0
+    moments_condition_number_array = []
+    #Now we run over each scenerio, with all possible degrees
+    name = sc_dict["name"]
+    allowed_degrees_array = sc_dict["desired_degrees"]
+    #Specify the relevant differential operator
+    differential_operator_L = operators_dict[name] #this function is defined above    
+    for degree_limit_d in allowed_degrees_array
+        moments_condition_number, maxgap, normalizedChristoffel = compute_certified_exit_density_estimation(degree_limit_d,space_vars_vector, differential_operator_L, initial_location, error_tolerance)
+        push!(moments_condition_number_array,moments_condition_number)
+        #Next we compute the approximation density at points on the circle
+        density_name = scenario_string_name(name, degree_limit_d)
+        y = [normalizedChristoffel(x=>point) for point in points]
+        #and write the result in our densities_dict (possibly overriding previous computations)
+        densities_dict[density_name] = y
+        if worst_moment_condition_number < moments_condition_number
+            worst_moment_condition_number = moments_condition_number
+        end
+        if maxgap < Tot_maxgap
+            Tot_maxgap = maxgap
+        end    
+    end
+    print("Largest observed gap is "*string(Tot_maxgap)*"\n")
+    print("Worst moment condition number is "*string(worst_moment_condition_number)*"\n")
+    print(string(moments_condition_number_array))
+    @assert(Tot_maxgap < error_tolerance)    
+    open(occupation_density_filename, "w") do f
+        JSON.print(f,densities_dict)    
+    end
+end
 
 
-#First we compute the data for the evaluations of our density estimate for the occupation measure
-#we will update older computations with same parameters with new data but also will keep old data 
-#computed with different parameters
 
+#First we compute the data for the evaluations of the OCCUPATION MEASURE density estimates
+#we wish to update older computations with same parameters with new data but also to keep old data 
+#computed with different parameters.
+#The calculation takes a few hours...
+"""
+n = 2 #dimension two
+@polyvar x[1:n]
 operators_dict=Dict("Brownian" => Brownian_infinitesimal_operator, "Brownian_drift"=> Brownian_with_drift_infinitesimal_operator, "Bessel"=>Sq_bessel_infinitesimal_operator)
-occupation_data_filename = "occupation_densities.json"
-name = "Brownian"
-differential_operator_L = operators_dict[name]
 degree_limit_d = 2
-res = compute_occupation_measure_data(name,differential_operator_L,degree_limit_d)
-#moments_condition_number, maxgap, density_estimation_func = compute_certified_occupation_density_estimation_ball(degree_limit_d,space_vars_vector, differential_operator_L, initial_condition, required_error_bound)
+for (name, differential_operator_L) in operators_dict
+    #the following function computes the data and writes it to file in .json format...
+    res = compute_occupation_measure_data(name,differential_operator_L,degree_limit_d)
+end
+"""
+#Finally, we compute the data for our exit location density estimates
+operators_dict=Dict("Brownian" => Brownian_infinitesimal_operator, "Brownian_drift"=> Brownian_with_drift_infinitesimal_operator, "Bessel"=>Sq_bessel_infinitesimal_operator)
+#We specify the parameters we want in our pictures
+pictures_dict=Dict(
+    "Exit_location_density_1" => Dict("name"=>"Brownian", "desired_degrees"=>[6,8]), 
+    "Exit_location_density_2" => Dict("name"=>"Brownian_drift", "desired_degrees"=> [6,8]),
+    "Exit_location_density_3" => Dict("name"=>"Bessel", "desired_degrees"=> [6,8])
+    )
+#And do the computation for each pictures.
+for sc_dict in values(pictures_dict)
+    compute_exit_location_density_data(sc_dict)
+end
+
 
 

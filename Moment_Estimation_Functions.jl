@@ -249,6 +249,7 @@ function find_a_low_degree_inverse_image_under_differential_operator(space_vars_
             return preimage_polynomial_p 
         end
         positive_offset += 1
+        println("Increasing Offset to "*string(positive_offset))
     end
 end
 
@@ -417,7 +418,7 @@ function compute_certified_exit_moment_matrix_on_sphere(degree_limit_d, space_va
                     target_functions_list = [g_1*g_2]
                 end
                 error_tolerance = required_error_bound                
-                lower_bounds, upper_bounds = compute_certified_exit_location_moments(space_vars_vector, target_functions_list, differential_operator_L, initial_location, error_tolerance)
+                lower_bounds, upper_bounds = compute_certified_exit_location_moments(space_vars_vector, target_functions_list, differential_operator_L, initial_condition, error_tolerance)
                 M[i,j] = (lower_bounds[1] + upper_bounds[1])/2
                 gap = abs(upper_bounds[1]-lower_bounds[1])
                 if maxgap <  gap
